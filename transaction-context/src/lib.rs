@@ -2,6 +2,13 @@
 #![deny(clippy::indexing_slicing)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
+use serde::{Deserialize, Serialize};
+#[cfg(all(
+    not(target_os = "solana"),
+    feature = "debug-signature",
+    debug_assertions
+))]
+use solana_signature::Signature;
 #[cfg(not(target_os = "solana"))]
 use {solana_account::WritableAccount, solana_rent::Rent, std::mem::MaybeUninit};
 use {
@@ -1198,6 +1205,7 @@ impl BorrowedAccount<'_> {
 }
 
 /// Everything that needs to be recorded from a TransactionContext after execution
+#[derive(Serialize, Deserialize)]
 #[cfg(not(target_os = "solana"))]
 pub struct ExecutionRecord {
     pub accounts: Vec<TransactionAccount>,

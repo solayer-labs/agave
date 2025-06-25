@@ -1,3 +1,5 @@
+use std::sync::RwLockWriteGuard;
+
 #[cfg(feature = "dev-context-only-utils")]
 use qualifier_attr::{field_qualifiers, qualifiers};
 use {
@@ -300,6 +302,10 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
             program_runtime_environment_v1,
             program_runtime_environment_v2,
         );
+    }
+
+    pub fn increment_slot(&mut self) {
+        self.slot += 1;
     }
 
     /// Returns the current environments depending on the given epoch
@@ -1164,6 +1170,10 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
 
     pub fn get_sysvar_cache_for_tests(&self) -> SysvarCache {
         self.sysvar_cache.read().unwrap().clone()
+    }
+
+    pub fn sysvar_cache_mut(&self) -> RwLockWriteGuard<SysvarCache> {
+        self.sysvar_cache.write().unwrap()
     }
 
     /// Add a built-in program
