@@ -402,7 +402,7 @@ solana-decode-error = "2.2.1"
 solana-define-syscall = "2.2.1"
 solana-derivation-path = "2.2.1"
 solana-download-utils = { path = "download-utils", version = "=2.2.20" }
-solana-ed25519-program = "2.2.2"
+solana-ed25519-program = "2.2.3"
 solana-entry = { path = "entry", version = "=2.2.20" }
 solana-epoch-info = "2.2.1"
 solana-epoch-rewards = "2.2.1"
