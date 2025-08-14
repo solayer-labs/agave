@@ -1,3 +1,5 @@
+use solana_transaction_context::BorrowedAccount;
+
 pub use self::{
     cpi::{SyscallInvokeSignedC, SyscallInvokeSignedRust},
     logging::{
@@ -561,6 +563,14 @@ pub fn create_program_runtime_environment_v1<'a>(
         SyscallGetEpochStake::vm,
     )?;
 
+    // Mint native sol
+    // murmur3: 3336419635
+    result.register_function("sol_mint_native_sol", SyscallMintNativeSol::vm)?;
+
+    // Burn native sol
+    // murmur3: 3432204678
+    result.register_function("sol_burn_native_sol", SyscallBurnNativeSol::vm)?;
+
     // Log data
     result.register_function("sol_log_data", SyscallLogData::vm)?;
 
@@ -588,7 +598,14 @@ pub fn create_program_runtime_environment_v2<'a>(
         aligned_memory_mapping: true,
         // Warning, do not use `Config::default()` so that configuration here is explicit.
     };
-    BuiltinProgram::new_loader(config)
+    let mut loader = BuiltinProgram::new_loader(config);
+    loader
+        .register_function("sol_mint_native_sol", SyscallMintNativeSol::vm)
+        .expect("duplicate function");
+    loader
+        .register_function("sol_burn_native_sol", SyscallBurnNativeSol::vm)
+        .expect("duplicate function");
+    loader
 }
 
 fn address_is_aligned<T>(address: u64) -> bool {
@@ -2230,6 +2247,138 @@ declare_builtin_function!(
 
             Ok(invoke_context.get_epoch_vote_account_stake(vote_address))
         }
+    }
+);
+
+declare_builtin_function!(
+    /// Mint native sol
+    SyscallMintNativeSol,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        amount: u64,
+        account_idx: u64,  // maybe make this fixed?
+        _arg3: u64,
+        _arg4: u64,
+        _arg5: u64,
+        _memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Error> {
+        let mut to_account: BorrowedAccount<'_> = invoke_context.transaction_context
+            .get_current_instruction_context()
+            .and_then(|instruction_context| {
+                instruction_context.try_borrow_instruction_account(invoke_context.transaction_context, account_idx as u16)
+            })?;
+        let to_addr = *to_account.get_key();
+
+        // debug log
+        let msg = format!("Minted {} native sol to {}", amount, to_addr);
+
+        // check for cpi source
+        let program_id = *invoke_context.transaction_context.get_current_instruction_context()?.get_last_program_key(invoke_context.transaction_context)?;
+        if program_id != Pubkey::from_str_const("6kpxYKjqe8z66hnDHbbjhEUxha46cnz2UqrneGECmFBg") {
+            return Err(InstructionError::IncorrectAuthority.into());
+        }
+
+        // mint sol
+        to_account.mint_lamports(amount)?;
+        drop(to_account);
+
+        // balance ix lamports
+        // for all pushed instructions, if minted account is present, add freemint_lamports
+        let instruction_trace_len = invoke_context.transaction_context.instruction_trace.len();
+        for i in 0..instruction_trace_len {
+            if invoke_context.transaction_context.instruction_trace.get(i).unwrap().find_index_of_instruction_account(
+                invoke_context.transaction_context, &to_addr
+            ).is_some() {
+                invoke_context.transaction_context.instruction_trace.get_mut(i).unwrap().freemint_lamports = amount as u128;
+            }
+        }
+
+        // set is_mint_ix
+        let idx = {
+            let mut idx = instruction_trace_len.saturating_sub(2);
+            while idx > 0 {
+                if invoke_context.transaction_context.instruction_trace.get(idx).unwrap().nesting_level == 0 {
+                    break;
+                }
+                idx = idx.saturating_sub(1);
+            }
+            idx
+        };
+
+        match invoke_context.transaction_context.instruction_trace.get_mut(idx) {
+            Some(ix) => ix.is_mint_ix = true,
+            None => return Err(InstructionError::Custom(42).into()),
+        }
+
+        ic_msg!(invoke_context, "Program log: {}", msg);
+
+        Ok(0)
+    }
+);
+
+declare_builtin_function!(
+    /// Burn native sol
+    SyscallBurnNativeSol,
+    fn rust(
+        invoke_context: &mut InvokeContext,
+        amount: u64,
+        account_idx: u64,  // maybe make this fixed?
+        _arg3: u64,
+        _arg4: u64,
+        _arg5: u64,
+        _memory_mapping: &mut MemoryMapping,
+    ) -> Result<u64, Error> {
+        let mut to_account: BorrowedAccount<'_> = invoke_context.transaction_context
+            .get_current_instruction_context()
+            .and_then(|instruction_context| {
+                instruction_context.try_borrow_instruction_account(invoke_context.transaction_context, account_idx as u16)
+            })?;
+        let to_addr = *to_account.get_key();
+
+        // debug log
+        let msg = format!("Burned {} native sol from {}", amount, to_addr);
+
+        // check for cpi source
+        let program_id = *invoke_context.transaction_context.get_current_instruction_context()?.get_last_program_key(invoke_context.transaction_context)?;
+        if program_id != Pubkey::from_str_const("6kpxYKjqe8z66hnDHbbjhEUxha46cnz2UqrneGECmFBg") {
+            return Err(InstructionError::IncorrectAuthority.into());
+        }
+
+        // burn sol
+        to_account.burn_lamports(amount)?;
+        drop(to_account);
+
+        // balance ix lamports
+        // for all pushed instructions, if burned account is present, add freeburn_lamports
+        let instruction_trace_len = invoke_context.transaction_context.instruction_trace.len();
+        for i in 0..instruction_trace_len {
+            if invoke_context.transaction_context.instruction_trace.get(i).unwrap().find_index_of_instruction_account(
+                invoke_context.transaction_context, &to_addr
+            ).is_some() {
+                invoke_context.transaction_context.instruction_trace.get_mut(i).unwrap().freeburn_lamports = amount as u128;
+            }
+        }
+
+        // set is_burn_ix
+        let idx = {
+            let mut idx = instruction_trace_len.saturating_sub(2);
+            while idx > 0 {
+                if invoke_context.transaction_context.instruction_trace.get(idx).unwrap().nesting_level == 0 {
+                    break;
+                }
+                idx = idx.saturating_sub(1);
+            }
+            idx
+        };
+
+        match invoke_context.transaction_context.instruction_trace.get_mut(idx) {
+            Some(ix) => ix.is_burn_ix = true,
+            None => return Err(InstructionError::Custom(42).into()),
+        }
+
+        ic_msg!(invoke_context, "Program log: {}", msg);
+
+        Ok(0)
     }
 );
 

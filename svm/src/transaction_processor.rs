@@ -1057,6 +1057,37 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
             None
         };
 
+        let freemint_lamports = {
+            let mint_traces: Vec<_> = transaction_context
+                .instruction_trace
+                .iter()
+                .filter(|ix| ix.is_mint_ix)
+                .map(|ix| ix.freemint_lamports)
+                .collect();
+            if mint_traces.len() > 1 {
+                status = Err(TransactionError::UnbalancedTransaction);
+            }
+            mint_traces.first().copied().unwrap_or(0)
+        };
+
+        let freeburn_lamports = {
+            let burn_traces: Vec<_> = transaction_context
+                .instruction_trace
+                .iter()
+                .filter(|ix| ix.is_burn_ix)
+                .map(|ix| ix.freeburn_lamports)
+                .collect();
+            if burn_traces.len() > 1 {
+                status = Err(TransactionError::UnbalancedTransaction);
+            }
+            burn_traces.first().copied().unwrap_or(0)
+        };
+
+        // Mint or burn cannot be used in the same tx
+        if freemint_lamports != 0 && freeburn_lamports != 0 {
+            status = Err(TransactionError::UnbalancedTransaction);
+        }
+
         let ExecutionRecord {
             accounts,
             return_data,
@@ -1066,11 +1097,17 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
 
         if status.is_ok()
             && transaction_accounts_lamports_sum(&accounts)
-                .filter(|lamports_after_tx| lamports_before_tx == *lamports_after_tx)
+                .filter(|lamports_after_tx| {
+                    lamports_before_tx
+                        == (*lamports_after_tx)
+                            .saturating_sub(freemint_lamports)
+                            .saturating_add(freeburn_lamports)
+                })
                 .is_none()
         {
             status = Err(TransactionError::UnbalancedTransaction);
         }
+        // TODO: additional check if it's a mint tx
         let status = status.map(|_| ());
 
         loaded_transaction.accounts = accounts;

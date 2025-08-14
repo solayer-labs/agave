@@ -3,12 +3,6 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 use serde::{Deserialize, Serialize};
-#[cfg(all(
-    not(target_os = "solana"),
-    feature = "debug-signature",
-    debug_assertions
-))]
-use solana_signature::Signature;
 #[cfg(not(target_os = "solana"))]
 use {solana_account::WritableAccount, solana_rent::Rent, std::mem::MaybeUninit};
 use {
@@ -151,7 +145,7 @@ pub struct TransactionContext {
     instruction_stack_capacity: usize,
     instruction_trace_capacity: usize,
     instruction_stack: Vec<usize>,
-    instruction_trace: Vec<InstructionContext>,
+    pub instruction_trace: Vec<InstructionContext>,
     top_level_instruction_index: usize,
     return_data: TransactionReturnData,
     accounts_resize_delta: RefCell<i64>,
@@ -342,6 +336,9 @@ impl TransactionContext {
                 self.instruction_accounts_lamport_sum(caller_instruction_context)?;
             if original_caller_instruction_accounts_lamport_sum
                 != current_caller_instruction_accounts_lamport_sum
+                    .checked_sub(caller_instruction_context.freemint_lamports)
+                    .and_then(|sum| sum.checked_add(caller_instruction_context.freeburn_lamports))
+                    .unwrap_or(u128::MAX)
             {
                 return Err(InstructionError::UnbalancedInstruction);
             }
@@ -396,8 +393,13 @@ impl TransactionContext {
                     }
                     self.instruction_accounts_lamport_sum(instruction_context)
                         .map(|instruction_accounts_lamport_sum| {
-                            instruction_context.instruction_accounts_lamport_sum
-                                != instruction_accounts_lamport_sum
+                            instruction_context
+                                .instruction_accounts_lamport_sum
+                                .checked_add(instruction_context.freemint_lamports)
+                                .and_then(|sum| {
+                                    sum.checked_sub(instruction_context.freeburn_lamports)
+                                })
+                                != Some(instruction_accounts_lamport_sum)
                         })
                 });
         // Always pop, even if we `detected_an_unbalanced_instruction`
@@ -454,6 +456,11 @@ impl TransactionContext {
                 .checked_add(instruction_accounts_lamport_sum)
                 .ok_or(InstructionError::ArithmeticOverflow)?;
         }
+        // subtract freemint lamports
+        instruction_accounts_lamport_sum
+            .checked_sub(instruction_context.freemint_lamports)
+            .and_then(|sum| sum.checked_add(instruction_context.freeburn_lamports))
+            .ok_or(InstructionError::ArithmeticOverflow)?;
         Ok(instruction_accounts_lamport_sum)
     }
 
@@ -508,8 +515,12 @@ pub struct TransactionReturnData {
 /// This context is valid for the entire duration of a (possibly cross program) instruction being processed.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct InstructionContext {
-    nesting_level: usize,
+    pub nesting_level: usize,
     instruction_accounts_lamport_sum: u128,
+    pub is_mint_ix: bool,
+    pub is_burn_ix: bool,
+    pub freemint_lamports: u128,
+    pub freeburn_lamports: u128,
     program_accounts: Vec<IndexOfAccount>,
     instruction_accounts: Vec<InstructionAccount>,
     instruction_data: Vec<u8>,
@@ -826,6 +837,54 @@ impl BorrowedAccount<'_> {
     #[inline]
     pub fn get_lamports(&self) -> u64 {
         self.account.lamports()
+    }
+
+    #[cfg(not(target_os = "solana"))]
+    pub fn mint_lamports(&mut self, lamports: u64) -> Result<(), InstructionError> {
+        // The balance of read-only may not change
+        if !self.is_writable() {
+            return Err(InstructionError::ReadonlyLamportChange);
+        }
+        // The balance of executable accounts may not change
+        if self.is_executable_internal() {
+            return Err(InstructionError::ExecutableLamportChange);
+        }
+        // don't touch the account if the lamports do not change
+        if lamports == 0 {
+            return Ok(());
+        }
+        self.touch()?;
+
+        let final_lamports = self
+            .get_lamports()
+            .checked_add(lamports)
+            .ok_or(InstructionError::ArithmeticOverflow)?;
+        self.account.set_lamports(final_lamports);
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "solana"))]
+    pub fn burn_lamports(&mut self, lamports: u64) -> Result<(), InstructionError> {
+        // The balance of read-only may not change
+        if !self.is_writable() {
+            return Err(InstructionError::ReadonlyLamportChange);
+        }
+        // The balance of executable accounts may not change
+        if self.is_executable_internal() {
+            return Err(InstructionError::ExecutableLamportChange);
+        }
+        // don't touch the account if the lamports do not change
+        if lamports == 0 {
+            return Ok(());
+        }
+        self.touch()?;
+
+        let final_lamports = self
+            .get_lamports()
+            .checked_sub(lamports)
+            .ok_or(InstructionError::ArithmeticOverflow)?;
+        self.account.set_lamports(final_lamports);
+        Ok(())
     }
 
     /// Overwrites the number of lamports of this account (transaction wide)
