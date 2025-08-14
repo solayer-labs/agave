@@ -449,7 +449,7 @@ solana-msg = "2.2.1"
 solana-native-token = "2.2.1"
 solana-net-utils = { path = "net-utils", version = "=2.2.20" }
 solana-nohash-hasher = "0.2.1"
-solana-nonce = "2.2.1"
+solana-nonce = "3.0.0"
 solana-nonce-account = "2.2.1"
 solana-notifier = { path = "notifier", version = "=2.2.20" }
 solana-offchain-message = "2.2.1"
