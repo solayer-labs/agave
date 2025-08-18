@@ -308,6 +308,10 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
         self.slot += 1;
     }
 
+    pub fn set_slot(&mut self, slot: Slot) {
+        self.slot = slot;
+    }
+
     /// Returns the current environments depending on the given epoch
     /// Returns None if the call could result in a deadlock
     #[cfg(feature = "dev-context-only-utils")]
