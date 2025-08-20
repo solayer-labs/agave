@@ -7742,9 +7742,9 @@ dependencies = [
 
 [[package]]
 name = "solana-file-download"
-version = "2.2.1"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96156c84b006ce3f00b37fa852a7d93de13ede4c40a58269663c3e01907453e3"
+checksum = "842227f0ae5ebffdfe686597a909cb406d2bd9b92432c516503b8cbd490a3ea6"
 dependencies = [
  "console",
  "indicatif",
