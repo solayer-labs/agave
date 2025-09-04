@@ -2272,11 +2272,22 @@ declare_builtin_function!(
         // debug log
         let msg = format!("Minted {} native sol to {}", amount, to_addr);
 
-        // check for cpi source
+        // check for authority
         let program_id = *invoke_context.transaction_context.get_current_instruction_context()?.get_last_program_key(invoke_context.transaction_context)?;
-        if program_id != Pubkey::from_str_const("6kpxYKjqe8z66hnDHbbjhEUxha46cnz2UqrneGECmFBg") {
+        let bridge_handler = {
+            let bridge_handler: BorrowedAccount<'_> = invoke_context.transaction_context
+            .get_current_instruction_context()
+            .and_then(|instruction_context| {
+                // When mint, 3rd account is bridge handler
+                instruction_context.try_borrow_instruction_account(invoke_context.transaction_context, 2)
+            })?;
+            *bridge_handler.get_key()
+        };
+        if program_id != Pubkey::from_str_const("6kpxYKjqe8z66hnDHbbjhEUxha46cnz2UqrneGECmFBg")
+        || bridge_handler != Pubkey::from_str_const("55uVZhH3jk95dLdnsJwMAG72pecMwa8MTjVH4ni7osBy") {
             return Err(InstructionError::IncorrectAuthority.into());
         }
+
 
         // mint sol
         to_account.mint_lamports(amount)?;
@@ -2338,9 +2349,19 @@ declare_builtin_function!(
         // debug log
         let msg = format!("Burned {} native sol from {}", amount, to_addr);
 
-        // check for cpi source
+        // check for authority
         let program_id = *invoke_context.transaction_context.get_current_instruction_context()?.get_last_program_key(invoke_context.transaction_context)?;
-        if program_id != Pubkey::from_str_const("6kpxYKjqe8z66hnDHbbjhEUxha46cnz2UqrneGECmFBg") {
+        let bridge_handler = {
+            let bridge_handler: BorrowedAccount<'_> = invoke_context.transaction_context
+            .get_current_instruction_context()
+            .and_then(|instruction_context| {
+                // When burn, 2nd account is bridge handler
+                instruction_context.try_borrow_instruction_account(invoke_context.transaction_context, 1)
+            })?;
+            *bridge_handler.get_key()
+        };
+        if program_id != Pubkey::from_str_const("6kpxYKjqe8z66hnDHbbjhEUxha46cnz2UqrneGECmFBg")
+        || bridge_handler != Pubkey::from_str_const("55uVZhH3jk95dLdnsJwMAG72pecMwa8MTjVH4ni7osBy") {
             return Err(InstructionError::IncorrectAuthority.into());
         }
 
